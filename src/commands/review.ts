@@ -9,7 +9,8 @@
  *
  * #33：任务领取与失败记录归调用方——先取 head SHA、入队并领取（置 running、
  * attempts+1）再跑 reviewPr；失败时在这里 markFailed（经 settleClaimedReview），
- * reviewPr 自己不再记失败。
+ * reviewPr 自己不再记失败。#35 复审补充：没真正审查的运行（高峰 / 闸门 / dry-run
+ * 预览）退回领取、不占失败次数；领取后 reviewPr 抛异常也记一次失败，不卡 running。
  */
 import { mkdirSync } from 'node:fs';
 import { loadGlobalConfig } from '../config/global.ts';
@@ -25,7 +26,7 @@ const USAGE = [
   '用法：glm-review review <owner/repo> <pr> [--dry-run] [--force] [--json]',
   '  手动审查一个 PR：去重 / 高峰与闸门 / diff 过滤分块 / 模型审查 / 发布 review。',
   '  --dry-run   只预览将要发布的 review（含 JSON 载荷），不发送',
-  '  --force     跳过去重检查（同一 commit 已审过也重审）',
+  '  --force     跳过去重检查（同一 commit 已审过也重审）；终态 failed 的任务重跑必须加它',
   '  --json      结果以一行 JSON 输出到 stdout（阶段进度走 stderr）',
 ].join('\n');
 
@@ -164,27 +165,56 @@ export const command: Command = {
         headSha: pr.headSha,
         now: ctx.deps.clock.now(),
       });
+      if (parsed.values.force !== true && job.status === 'failed') {
+        // 终态 failed 的任务手动重跑必须显式 --force（#35 复审建议）：不提示就静默重审，
+        // 用户容易把「已达上限」的任务当成还在自动重试。
+        ctx.stderr(
+          `任务 ${job.id}（${repo}#${prRaw}）已达重试上限，处于终态 failed；如需重新审查请加 --force。\n`,
+        );
+        return 1;
+      }
       claimJob(state, job.id, ctx.deps.clock.now());
 
-      outcome = await reviewPr(
-        { repo, pr: Number(prRaw), headSha: pr.headSha, force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
-        {
-          exec: ctx.deps.exec,
-          clock: ctx.deps.clock,
-          env: ctx.deps.env,
-          paths: ctx.deps.paths,
-          log: ctx.deps.log,
+      const retry = { maxAttempts: config.retry.maxAttempts, backoffSeconds: config.retry.backoffSec };
+      try {
+        outcome = await reviewPr(
+          { repo, pr: Number(prRaw), headSha: pr.headSha, force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
+          {
+            exec: ctx.deps.exec,
+            clock: ctx.deps.clock,
+            env: ctx.deps.env,
+            paths: ctx.deps.paths,
+            log: ctx.deps.log,
+            state,
+            out: json ? ctx.stderr : ctx.stdout,
+            progress,
+          },
+        );
+      } catch (err) {
+        // #35 复审 B：领取之后抛异常（gh 502 等基础设施错误）不能把任务卡在 running——
+        // 由调用方记一次失败（markFailed，按退避回队列或达上限进终态），再继续抛给 CLI 兜底。
+        const error = err instanceof Error ? err.message : String(err);
+        const failed = settleClaimedReview(
           state,
-          out: json ? ctx.stderr : ctx.stdout,
-          progress,
-        },
-      );
+          job,
+          { status: 'failed', error, jobId: job.id },
+          { now: ctx.deps.clock.now(), retry },
+        );
+        ctx.deps.log.error('审查抛出异常，已由调用方记一次失败', {
+          repo,
+          pr: Number(prRaw),
+          jobId: job.id,
+          err: error,
+          status: failed?.status,
+        });
+        throw err;
+      }
 
       // 收尾（#33 调用方契约）：失败在这里记一次（markFailed，attempts 已在领取时 +1）；
-      // waiting / superseded / dry-run 预览放回队列，不卡在 running。
+      // deferred / waiting / superseded / dry-run 预览没真正审查，退回领取不占失败次数。
       const settled = settleClaimedReview(state, job, outcome, {
         now: ctx.deps.clock.now(),
-        retry: { maxAttempts: config.retry.maxAttempts, backoffSeconds: config.retry.backoffSec },
+        retry,
       });
       if (outcome.status === 'failed' && settled !== undefined) {
         failure = { requeued: settled.status === 'queued', attempts: settled.attempts };

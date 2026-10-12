@@ -3,8 +3,8 @@
  * attempts 恒为 0，永远进不了终态 failed）。领取与失败记录归调用方：
  *
  * - CLI `review` 路径（本文件）：getPr 拿 head SHA → enqueue 建任务行 → claimJob 领取
- *   （置 running、attempts+1）→ reviewPr → settleClaimedReview 收尾（失败 markFailed /
- *   未真正执行的画面放回队列）；
+ *   （置 running、attempts+1）→ reviewPr → settleClaimedReview 收尾（失败 markFailed；
+ *   没真正审查的运行 refundClaim 退回领取，不占失败次数）；
  * - #13 的 worker：自己的 claimNext（按队列顺序领取）→ reviewPr → 自己的 markFailed。
  *
  * jobs.ts（#5）只提供按队列顺序的 claimNext，没有按 id 领取；本文件用同样的语义在
@@ -34,18 +34,20 @@ export function claimJob(state: StateDb, id: number, now: Date): Job {
 }
 
 /**
- * 把指定任务放回 queued（与 recoverStale 同语义，但只影响这一行）：清 started_at、
- * 保留 attempts（领取已计入尝试次数）与 not_before。非 running 的行不动。
- * 用于领取过、但没走到终态的收尾（waiting / superseded / dry-run 预览），
- * 避免任务卡在 running 等守护进程的崩溃恢复来收拾。
+ * 退回一次领取（#35 复审 A：没真正审查的运行不占失败次数）：attempts -1（不低于 0）、
+ * 清 started_at。after 决定任务回到哪里：
+ * - 'queued'：waiting / superseded / dry-run 预览——闸门没过或只是预览，放回队列；
+ * - 'deferred'：高峰延后——reviewPr 已把行置为 deferred 并设好 not_before，这里只退
+ *   领取（status 与 not_before 原样保留）。
+ * 只影响 running / deferred 的行，其余不动。
  */
-export function requeueJob(state: StateDb, id: number, now: Date): Job {
+export function refundClaim(state: StateDb, id: number, now: Date, after: 'queued' | 'deferred'): Job {
   state.sqlite
     .prepare(
-      `UPDATE jobs SET status = 'queued', started_at = NULL, updated_at = ?
-       WHERE id = ? AND status = 'running'`,
+      `UPDATE jobs SET status = ?, attempts = MAX(0, attempts - 1), started_at = NULL, updated_at = ?
+       WHERE id = ? AND status IN ('running', 'deferred')`,
     )
-    .run(toIso(now), id);
+    .run(after, toIso(now), id);
   return getJob(state, id);
 }
 
@@ -56,12 +58,13 @@ export interface SettleOptions {
 }
 
 /**
- * 领取后的一次收尾（调用方契约，#33）：
+ * 领取后的一次收尾（调用方契约，#33 / #35 复审 A）：
  * - failed：调用方记一次失败（markFailed）——按领取时累计的 attempts 决定回队列退避
- *   还是终态 failed；
- * - waiting / superseded / dry-run 预览：reviewPr 没把任务落到终态，放回 queued；
- * - 其余（reviewed / skipped / deferred / already-reviewed）：reviewPr 内部已落库，
- *   不用动，返回 undefined。
+ *   还是终态 failed；真实审查（含 dry-run 里 claude 真失败了）才占失败次数；
+ * - deferred / waiting / superseded / dry-run 预览：没真正审查，refundClaim 退回领取
+ *   （attempts -1、清 started_at），任务回到排队状态；
+ * - 其余（reviewed / skipped / already-reviewed）：reviewPr 内部已落库，不用动，
+ *   返回 undefined。
  *
  * 返回收尾后的任务；没有任何动作时返回 undefined。失败是否回队列看返回值的
  * status（queued = 已回队列重试，failed = 已达上限的终态）。
@@ -75,12 +78,14 @@ export function settleClaimedReview(
   switch (outcome.status) {
     case 'failed':
       return markFailed(state, job.id, outcome.error, { now: options.now, retry: options.retry });
+    case 'deferred':
+      return refundClaim(state, job.id, options.now, 'deferred');
     case 'waiting':
     case 'superseded':
-      return requeueJob(state, job.id, options.now);
+      return refundClaim(state, job.id, options.now, 'queued');
     case 'reviewed':
-      // dry-run 预览不标记 done（不占「审过」去重键），领取过的行放回队列。
-      return outcome.dryRun ? requeueJob(state, job.id, options.now) : undefined;
+      // dry-run 预览不标记 done（不占「审过」去重键），也不占失败次数，退回领取。
+      return outcome.dryRun ? refundClaim(state, job.id, options.now, 'queued') : undefined;
     default:
       return undefined;
   }
