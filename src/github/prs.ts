@@ -1,6 +1,9 @@
 /**
  * PR 元信息 / diff / 评论查询（见 #6）：全部经由 gh CLI，不读 token、不发 HTTP。
  * - listOpenPrs / getPr：`gh pr list` / `gh pr view --json`，映射成共享的 PrInfo；
+ * - getPrBaseSha：base 的 commit SHA 经 `gh api` REST 端点单独取——`pr view --json`
+ *   的 baseRefOid 字段 gh ≥ 2.76 才支持（#30），PR_FIELDS 不再请求它，
+ *   PrInfo.baseSha 通常缺省、需要时另查；
  * - getDiff：`gh pr diff` 的 unified diff 文本，超过 maxBytes（默认 2 MB）抛 DiffTooLargeError；
  * - getPrComments：`gh api repos/<repo>/issues/<n>/comments --paginate`（会话评论，
  *   供 #12 识别 `/glm-review` 重审命令）。
@@ -20,8 +23,13 @@ import {
   type GithubDeps,
 } from './run.ts';
 
+/**
+ * `pr view/list --json` 请求的字段。刻意不含 baseRefOid：该字段 gh ≥ 2.76 才支持，
+ * gh 2.46.0（Debian 打包）上一请求就整条命令报 Unknown JSON field 失败（#30）；
+ * base 的 SHA 需要时用 getPrBaseSha 经 `gh api` 另查。
+ */
 const PR_FIELDS =
-  'number,title,author,url,headRefOid,baseRefOid,baseRefName,headRefName,isDraft,labels,updatedAt,state';
+  'number,title,author,url,headRefOid,baseRefName,headRefName,isDraft,labels,updatedAt,state';
 
 export const DEFAULT_MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
@@ -51,6 +59,22 @@ export async function getPr(deps: GithubDeps, repo: RepoSlug, number: number): P
 
 function parseSinglePr(text: string): Record<string, unknown> {
   return parseSingleObject(text, 'gh pr view 输出');
+}
+
+/**
+ * 单独取 base 分支当前的 commit SHA（合并基）。走 `gh api` 的 REST 端点
+ * `repos/<repo>/pulls/<n>`（读 `base.sha`），不依赖 `pr view --json` 的
+ * baseRefOid 字段，gh 2.46.0 起（含）可用；见 PR_FIELDS 注释与 #30。
+ */
+export async function getPrBaseSha(deps: GithubDeps, repo: RepoSlug, number: number): Promise<string> {
+  assertPositiveInt(number, 'PR 编号');
+  const result = await runGh(deps, ['api', `repos/${repo}/pulls/${number}`]);
+  const raw = parseSingleObject(result.stdout, 'gh api pulls 输出');
+  const sha = asString(asRecord(raw.base)?.sha);
+  if (sha === '') {
+    throw new UnexpectedResponseError(`PR #${number} 的 gh api 响应缺少 base.sha 字段：${JSON.stringify(raw).slice(0, 120)}`);
+  }
+  return sha;
 }
 
 export interface GetDiffOptions {
@@ -118,7 +142,6 @@ function toPrInfo(repo: RepoSlug, raw: Record<string, unknown>): PrInfo {
     author: asString(asRecord(raw.author)?.login),
     url: asString(raw.url),
     headSha,
-    baseSha: asString(raw.baseRefOid),
     baseRef: asString(raw.baseRefName),
     headRef: asString(raw.headRefName),
     isDraft: asBoolean(raw.isDraft),

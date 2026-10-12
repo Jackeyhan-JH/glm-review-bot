@@ -10,7 +10,6 @@
   "headRefName": "feat/multi-currency",
   "headRefOid": "9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c",
   "baseRefName": "main",
-  "baseRefOid": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
   "labels": [
     {
       "name": "ready"

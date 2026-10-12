@@ -22,6 +22,7 @@ export {
   DEFAULT_MAX_DIFF_BYTES,
   listOpenPrs,
   getPr,
+  getPrBaseSha,
   getDiff,
   getPrComments,
   type GetDiffOptions,

@@ -36,7 +36,8 @@ export interface PrInfo {
   author: string;
   url: string;
   headSha: string;
-  baseSha: string;
+  /** base 的 commit SHA。`--json baseRefOid` 需 gh ≥ 2.76（#30），运行时不请求，通常缺省；需要时经 github.getPrBaseSha 另查。 */
+  baseSha?: string;
   baseRef: string;
   headRef: string;
   isDraft: boolean;
