@@ -90,6 +90,8 @@ export interface WorldOptions {
   reviews?: Array<Record<string, unknown>>;
   /** 假 claude 的应答规则；缺省成功返回样例输出。 */
   claude?: FakeBinRule;
+  /** 覆盖 gh pr diff 应答规则的字段（如 { code: 1, stderr: 'gh: HTTP 502' } 模拟基础设施故障）。 */
+  diff?: FakeBinRule;
   /** 创建额度暂停文件（路径写进全局配置的 pauseFile）。 */
   paused?: boolean;
 }
@@ -117,7 +119,7 @@ export function setupFakeRepo(fake: FakeBin, options: WorldOptions = {}): void {
     match: ['pr', 'view', String(PR_NO), '--repo', REPO, '--json', 'body'],
     stdout: JSON.stringify({ body: '支持多币种分账，汇率取自配置。' }),
   });
-  fake.rule('gh', { match: ['pr', 'diff', String(PR_NO), '--repo', REPO], stdout: SAMPLE_DIFF });
+  fake.rule('gh', { match: ['pr', 'diff', String(PR_NO), '--repo', REPO], stdout: SAMPLE_DIFF, ...options.diff });
   fake.rule('gh', { match: ['repo', 'clone'], mode: 'prefix', stdout: '' });
   fake.rule('gh', {
     match: ['api', '--method', 'POST', `repos/${REPO}/pulls/${PR_NO}/reviews`, '--input', '-'],

@@ -6,19 +6,27 @@
  * - 不在白名单的仓库直接报错（退出码 2，--force 也不放行）；
  * - 各阶段进度逐行输出（--json 时进度走 stderr，stdout 只留结果那一行 JSON）；
  * - 结果（review 链接 / 跳过原因 / 排队时间）中文输出；审查失败退出码 1。
+ *
+ * #33：任务领取与失败记录归调用方——先取 head SHA、入队并领取（置 running、
+ * attempts+1）再跑 reviewPr；失败时在这里 markFailed（经 settleClaimedReview），
+ * reviewPr 自己不再记失败。#35 复审补充：没真正审查的运行（高峰 / 闸门 / dry-run
+ * 预览）退回领取、不占失败次数；领取后 reviewPr 抛异常也记一次失败，不卡 running。
  */
 import { mkdirSync } from 'node:fs';
 import { loadGlobalConfig } from '../config/global.ts';
+import { getPr } from '../github/index.ts';
 import { ArgError, parseArgs } from '../lib/args.ts';
 import type { CliContext, Command } from '../lib/types.ts';
+import { claimJob, settleClaimedReview } from '../pipeline/claim.ts';
 import { reviewPr, type ReviewOutcome } from '../pipeline/review.ts';
 import { openState } from '../state/db.ts';
+import { enqueue } from '../state/jobs.ts';
 
 const USAGE = [
   '用法：glm-review review <owner/repo> <pr> [--dry-run] [--force] [--json]',
   '  手动审查一个 PR：去重 / 高峰与闸门 / diff 过滤分块 / 模型审查 / 发布 review。',
   '  --dry-run   只预览将要发布的 review（含 JSON 载荷），不发送',
-  '  --force     跳过去重检查（同一 commit 已审过也重审）',
+  '  --force     跳过去重检查（同一 commit 已审过也重审）；终态 failed 的任务重跑必须加它',
   '  --json      结果以一行 JSON 输出到 stdout（阶段进度走 stderr）',
 ].join('\n');
 
@@ -50,8 +58,14 @@ const SKIP_LABEL: Record<string, string> = {
   'no-reviewable-changes': '过滤后没有可审查的改动（全部被忽略规则 / 生成文件等排除），未发布评论',
 };
 
+/** 失败收尾信息（调用方 markFailed 之后才有：是否回队列、累计尝试次数）。 */
+interface FailureInfo {
+  requeued: boolean;
+  attempts: number;
+}
+
 /** 结果 → 中文文案（一行到几行；退出码由调用处决定）。 */
-function renderOutcome(outcome: ReviewOutcome): string {
+function renderOutcome(outcome: ReviewOutcome, failure?: FailureInfo): string {
   switch (outcome.status) {
     case 'reviewed':
       if (outcome.dryRun) {
@@ -82,9 +96,10 @@ function renderOutcome(outcome: ReviewOutcome): string {
     case 'skipped':
       return SKIP_LABEL[outcome.reason] ?? `已跳过（${outcome.reason}）。`;
     case 'failed':
-      return outcome.requeued
-        ? `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已按重试策略回到队列（峰后由守护进程重试，或稍后重新运行本命令）。`
-        : `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已达重试上限，标记为 failed。`;
+      if (failure === undefined) return `审查失败：${outcome.error}`;
+      return failure.requeued
+        ? `审查失败：${outcome.error}\n任务 ${outcome.jobId} 第 ${failure.attempts} 次失败，已按重试策略回到队列（峰后由守护进程重试，或稍后重新运行本命令）。`
+        : `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已达重试上限（共 ${failure.attempts} 次），标记为 failed。`;
   }
 }
 
@@ -138,29 +153,88 @@ export const command: Command = {
     mkdirSync(ctx.deps.paths.home, { recursive: true });
     const state = openState(ctx.deps.paths.stateDb);
     let outcome: ReviewOutcome;
+    let failure: FailureInfo | undefined;
     try {
-      outcome = await reviewPr(
-        { repo, pr: Number(prRaw), force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
-        {
-          exec: ctx.deps.exec,
-          clock: ctx.deps.clock,
-          env: ctx.deps.env,
-          paths: ctx.deps.paths,
-          log: ctx.deps.log,
+      // #33：先取 head SHA 并入队、领取（置 running、attempts+1），再跑流水线；
+      // reviewPr 不领取任务、不记失败。传入 headSha 让 reviewPr 复用同一任务行，
+      // 万一 head 在这期间又变了它会返回 superseded（不另建行）。
+      const pr = await getPr(ctx.deps, repo, Number(prRaw));
+      const { job } = enqueue(state, {
+        repo,
+        pr: Number(prRaw),
+        headSha: pr.headSha,
+        now: ctx.deps.clock.now(),
+      });
+      if (parsed.values.force !== true && job.status === 'failed') {
+        // 终态 failed 的任务手动重跑必须显式 --force（#35 复审建议）：不提示就静默重审，
+        // 用户容易把「已达上限」的任务当成还在自动重试。
+        ctx.stderr(
+          `任务 ${job.id}（${repo}#${prRaw}）已达重试上限，处于终态 failed；如需重新审查请加 --force。\n`,
+        );
+        return 1;
+      }
+      claimJob(state, job.id, ctx.deps.clock.now());
+
+      const retry = { maxAttempts: config.retry.maxAttempts, backoffSeconds: config.retry.backoffSec };
+      try {
+        outcome = await reviewPr(
+          { repo, pr: Number(prRaw), headSha: pr.headSha, force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
+          {
+            exec: ctx.deps.exec,
+            clock: ctx.deps.clock,
+            env: ctx.deps.env,
+            paths: ctx.deps.paths,
+            log: ctx.deps.log,
+            state,
+            out: json ? ctx.stderr : ctx.stdout,
+            progress,
+          },
+        );
+      } catch (err) {
+        // #35 复审 B：领取之后抛异常（gh 502 等基础设施错误）不能把任务卡在 running——
+        // 由调用方记一次失败（markFailed，按退避回队列或达上限进终态），再继续抛给 CLI 兜底。
+        const error = err instanceof Error ? err.message : String(err);
+        const failed = settleClaimedReview(
           state,
-          out: json ? ctx.stderr : ctx.stdout,
-          progress,
-        },
-      );
+          job,
+          { status: 'failed', error, jobId: job.id },
+          { now: ctx.deps.clock.now(), retry },
+        );
+        ctx.deps.log.error('审查抛出异常，已由调用方记一次失败', {
+          repo,
+          pr: Number(prRaw),
+          jobId: job.id,
+          err: error,
+          status: failed?.status,
+        });
+        throw err;
+      }
+
+      // 收尾（#33 调用方契约）：失败在这里记一次（markFailed，attempts 已在领取时 +1）；
+      // deferred / waiting / superseded / dry-run 预览没真正审查，退回领取不占失败次数。
+      const settled = settleClaimedReview(state, job, outcome, {
+        now: ctx.deps.clock.now(),
+        retry,
+      });
+      if (outcome.status === 'failed' && settled !== undefined) {
+        failure = { requeued: settled.status === 'queued', attempts: settled.attempts };
+        ctx.deps.log.info('审查失败已由调用方记录', {
+          repo,
+          pr: Number(prRaw),
+          jobId: outcome.jobId,
+          attempts: failure.attempts,
+          requeued: failure.requeued,
+        });
+      }
     } finally {
       state.close();
     }
 
     if (json) {
-      ctx.stdout(`${JSON.stringify(outcome)}\n`);
+      ctx.stdout(`${JSON.stringify(failure === undefined ? outcome : { ...outcome, ...failure })}\n`);
       return outcome.status === 'failed' ? 1 : 0;
     }
-    const text = renderOutcome(outcome);
+    const text = renderOutcome(outcome, failure);
     if (outcome.status === 'failed') {
       ctx.stderr(`${text}\n`);
       return 1;
