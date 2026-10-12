@@ -1,0 +1,23 @@
+{
+  "number": 45,
+  "title": "feat(pay): 支持多币种分摊",
+  "author": {
+    "login": "Jackeyhan-JH"
+  },
+  "url": "https://github.com/Jackeyhan-JH/glm-toolbox/pull/45",
+  "state": "OPEN",
+  "isDraft": false,
+  "headRefName": "feat/multi-currency",
+  "headRefOid": "9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c",
+  "baseRefName": "main",
+  "baseRefOid": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+  "labels": [
+    {
+      "name": "ready"
+    },
+    {
+      "name": "enhancement"
+    }
+  ],
+  "updatedAt": "2026-10-10T08:30:00Z"
+}

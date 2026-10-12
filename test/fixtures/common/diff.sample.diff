@@ -1,0 +1,28 @@
+diff --git a/src/calc.ts b/src/calc.ts
+index 3bd1f2e..8a9c4d1 100644
+--- a/src/calc.ts
++++ b/src/calc.ts
+@@ -10,8 +10,12 @@ export function split(total: number, n: number) {
+   if (!Number.isFinite(total)) {
+     throw new Error('总金额必须是数字');
+   }
+-  const even = total / n;
++  if (n <= 0) {
++    throw new Error('人数必须为正数');
++  }
++  const even = Math.round((total / n) * 100) / 100;
++  const remainder = Math.round((total - even * n) * 100) / 100;
+   const parts = new Array(n).fill(even);
+   parts[n - 1] = even + remainder;
+   return parts;
+ }
+diff --git a/src/parse.ts b/src/parse.ts
+new file mode 100644
+index 0000000..5e6f7a8
+--- /dev/null
++++ b/src/parse.ts
+@@ -0,0 +1,4 @@
++export function parseAmount(input: string): number {
++  const value = Number(input.replace(/[,$]/g, ''));
++  return value;
++}

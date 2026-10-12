@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# glm-review 入口：直接用 Node 运行 .ts 源码（Node 24 内置类型剥离，无需编译）。
+set -euo pipefail
+exec node "$(dirname "$(readlink -f "$0")")/../src/cli.ts" "$@"
