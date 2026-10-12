@@ -1,0 +1,26 @@
+{
+  "name": "glm-review-bot",
+  "version": "0.1.0",
+  "description": "GLM 代码审查机器人：轮询白名单仓库的 PR，用本机 Claude Code（GLM）审查并发布行内评论",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "glm-review": "bin/glm-review"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "typescript": "^5.9.3"
+  }
+}
