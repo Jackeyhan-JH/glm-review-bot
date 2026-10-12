@@ -1,0 +1,19 @@
+diff --git a/ten-renamed.txt b/ten-edited.txt
+similarity index 72%
+rename from ten-renamed.txt
+rename to ten-edited.txt
+index 4083766..03fa29f 100644
+--- a/ten-renamed.txt
++++ b/ten-edited.txt
+@@ -1,5 +1,5 @@
+ line1
+-line2
++line2 changed
+ line3
+ line4
+ line5
+@@ -8,3 +8,4 @@ line7
+ line8
+ line9
+ line10
++line11

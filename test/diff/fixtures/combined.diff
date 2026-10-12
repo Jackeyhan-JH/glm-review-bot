@@ -1,0 +1,32 @@
+diff --git a/blank.txt b/blank.txt
+index fb8105c..ff8b544 100644
+--- a/blank.txt
++++ b/blank.txt
+@@ -1,4 +1,4 @@
+-alpha
++alpha!
+ 
+ beta
+ 
+diff --git a/pkg/one.ts b/pkg/one.ts
+index cc798ff..ba5e8f4 100644
+--- a/pkg/one.ts
++++ b/pkg/one.ts
+@@ -1 +1,2 @@
+-export const a = 1;
++export const a = 10;
++export const a2 = 11;
+diff --git a/pkg/three.ts b/pkg/three.ts
+new file mode 100644
+index 0000000..5f0cabe
+--- /dev/null
++++ b/pkg/three.ts
+@@ -0,0 +1 @@
++export const c = 3;
+diff --git a/pkg/two.ts b/pkg/two.ts
+deleted file mode 100644
+index 2021030..0000000
+--- a/pkg/two.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export const b = 2;

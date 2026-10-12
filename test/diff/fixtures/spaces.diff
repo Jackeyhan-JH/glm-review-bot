@@ -1,0 +1,9 @@
+diff --git a/my lib/util helpers.ts b/my lib/util helpers.ts
+index 35dd59e..cebc869 100644
+--- a/my lib/util helpers.ts	
++++ b/my lib/util helpers.ts	
+@@ -1,2 +1,3 @@
+ const x = 1;
+-const y = 2;
++const y = 3;
++const z = 4;

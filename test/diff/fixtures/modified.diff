@@ -1,0 +1,12 @@
+diff --git a/src/calc.ts b/src/calc.ts
+index 8eb502a..3a4c6cf 100644
+--- a/src/calc.ts
++++ b/src/calc.ts
+@@ -1,4 +1,7 @@
+ export function add(a: number, b: number): number {
++  if (!Number.isFinite(a) || !Number.isFinite(b)) {
++    throw new Error('参数必须是数字');
++  }
+   return a + b;
+ }
+ 
