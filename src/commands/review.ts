@@ -6,13 +6,20 @@
  * - 不在白名单的仓库直接报错（退出码 2，--force 也不放行）；
  * - 各阶段进度逐行输出（--json 时进度走 stderr，stdout 只留结果那一行 JSON）；
  * - 结果（review 链接 / 跳过原因 / 排队时间）中文输出；审查失败退出码 1。
+ *
+ * #33：任务领取与失败记录归调用方——先取 head SHA、入队并领取（置 running、
+ * attempts+1）再跑 reviewPr；失败时在这里 markFailed（经 settleClaimedReview），
+ * reviewPr 自己不再记失败。
  */
 import { mkdirSync } from 'node:fs';
 import { loadGlobalConfig } from '../config/global.ts';
+import { getPr } from '../github/index.ts';
 import { ArgError, parseArgs } from '../lib/args.ts';
 import type { CliContext, Command } from '../lib/types.ts';
+import { claimJob, settleClaimedReview } from '../pipeline/claim.ts';
 import { reviewPr, type ReviewOutcome } from '../pipeline/review.ts';
 import { openState } from '../state/db.ts';
+import { enqueue } from '../state/jobs.ts';
 
 const USAGE = [
   '用法：glm-review review <owner/repo> <pr> [--dry-run] [--force] [--json]',
@@ -50,8 +57,14 @@ const SKIP_LABEL: Record<string, string> = {
   'no-reviewable-changes': '过滤后没有可审查的改动（全部被忽略规则 / 生成文件等排除），未发布评论',
 };
 
+/** 失败收尾信息（调用方 markFailed 之后才有：是否回队列、累计尝试次数）。 */
+interface FailureInfo {
+  requeued: boolean;
+  attempts: number;
+}
+
 /** 结果 → 中文文案（一行到几行；退出码由调用处决定）。 */
-function renderOutcome(outcome: ReviewOutcome): string {
+function renderOutcome(outcome: ReviewOutcome, failure?: FailureInfo): string {
   switch (outcome.status) {
     case 'reviewed':
       if (outcome.dryRun) {
@@ -82,9 +95,10 @@ function renderOutcome(outcome: ReviewOutcome): string {
     case 'skipped':
       return SKIP_LABEL[outcome.reason] ?? `已跳过（${outcome.reason}）。`;
     case 'failed':
-      return outcome.requeued
-        ? `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已按重试策略回到队列（峰后由守护进程重试，或稍后重新运行本命令）。`
-        : `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已达重试上限，标记为 failed。`;
+      if (failure === undefined) return `审查失败：${outcome.error}`;
+      return failure.requeued
+        ? `审查失败：${outcome.error}\n任务 ${outcome.jobId} 第 ${failure.attempts} 次失败，已按重试策略回到队列（峰后由守护进程重试，或稍后重新运行本命令）。`
+        : `审查失败：${outcome.error}\n任务 ${outcome.jobId} 已达重试上限（共 ${failure.attempts} 次），标记为 failed。`;
   }
 }
 
@@ -138,9 +152,22 @@ export const command: Command = {
     mkdirSync(ctx.deps.paths.home, { recursive: true });
     const state = openState(ctx.deps.paths.stateDb);
     let outcome: ReviewOutcome;
+    let failure: FailureInfo | undefined;
     try {
+      // #33：先取 head SHA 并入队、领取（置 running、attempts+1），再跑流水线；
+      // reviewPr 不领取任务、不记失败。传入 headSha 让 reviewPr 复用同一任务行，
+      // 万一 head 在这期间又变了它会返回 superseded（不另建行）。
+      const pr = await getPr(ctx.deps, repo, Number(prRaw));
+      const { job } = enqueue(state, {
+        repo,
+        pr: Number(prRaw),
+        headSha: pr.headSha,
+        now: ctx.deps.clock.now(),
+      });
+      claimJob(state, job.id, ctx.deps.clock.now());
+
       outcome = await reviewPr(
-        { repo, pr: Number(prRaw), force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
+        { repo, pr: Number(prRaw), headSha: pr.headSha, force: parsed.values.force === true, dryRun: parsed.values['dry-run'] === true },
         {
           exec: ctx.deps.exec,
           clock: ctx.deps.clock,
@@ -152,15 +179,32 @@ export const command: Command = {
           progress,
         },
       );
+
+      // 收尾（#33 调用方契约）：失败在这里记一次（markFailed，attempts 已在领取时 +1）；
+      // waiting / superseded / dry-run 预览放回队列，不卡在 running。
+      const settled = settleClaimedReview(state, job, outcome, {
+        now: ctx.deps.clock.now(),
+        retry: { maxAttempts: config.retry.maxAttempts, backoffSeconds: config.retry.backoffSec },
+      });
+      if (outcome.status === 'failed' && settled !== undefined) {
+        failure = { requeued: settled.status === 'queued', attempts: settled.attempts };
+        ctx.deps.log.info('审查失败已由调用方记录', {
+          repo,
+          pr: Number(prRaw),
+          jobId: outcome.jobId,
+          attempts: failure.attempts,
+          requeued: failure.requeued,
+        });
+      }
     } finally {
       state.close();
     }
 
     if (json) {
-      ctx.stdout(`${JSON.stringify(outcome)}\n`);
+      ctx.stdout(`${JSON.stringify(failure === undefined ? outcome : { ...outcome, ...failure })}\n`);
       return outcome.status === 'failed' ? 1 : 0;
     }
-    const text = renderOutcome(outcome);
+    const text = renderOutcome(outcome, failure);
     if (outcome.status === 'failed') {
       ctx.stderr(`${text}\n`);
       return 1;

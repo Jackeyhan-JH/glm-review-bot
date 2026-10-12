@@ -155,3 +155,124 @@ test('review：审查失败 → 退出码 1，错误走 stderr', async () => {
   }
 });
 
+/** 打开命令用的状态库（命令每次运行自己 open / close，这里只读）。 */
+function openCommandState(harness: ReturnType<typeof createCliHarness>) {
+  return openState(resolvePaths(harness.ctx.deps.env).stateDb);
+}
+
+test('review：同一任务连续失败 3 次 → 每次由调用方记一次失败，第 3 次后终态 failed（#33）', async () => {
+  const w = createWorld({ claude: { code: 1, stderr: 'Error: service unavailable (503)' } });
+  try {
+    const harness = createCliHarness(w.fake, w.tmp, w.clock);
+    for (let round = 1; round <= 3; round++) {
+      const code = await runCli(['review', REPO, String(PR_NO)], { ctx: harness.ctx });
+      assert.equal(code, 1, `第 ${round} 次失败应退出码 1`);
+      const state = openCommandState(harness);
+      try {
+        const jobs = listJobs(state);
+        assert.equal(jobs.length, 1); // 同键只有一行任务
+        const job = jobs[0];
+        assert.ok(job !== undefined);
+        // 领取与失败记录都在调用方：attempts 每轮 +1，不再恒为 0
+        assert.equal(job.attempts, round, `第 ${round} 次失败后 attempts 应为 ${round}`);
+        if (round < 3) {
+          assert.equal(job.status, 'queued', `第 ${round} 次失败未达上限，应回队列`);
+          assert.equal(job.startedAt, null);
+          assert.ok(job.reason !== null && job.reason.includes('claude'));
+        } else {
+          assert.equal(job.status, 'failed', '第 3 次失败达重试上限，应终态 failed');
+          assert.ok(job.finishedAt !== null);
+        }
+      } finally {
+        state.close();
+      }
+    }
+    assert.ok(harness.stderr().includes('审查失败'));
+    assert.ok(harness.stderr().includes('回到队列'));
+    assert.ok(harness.stderr().includes('已达重试上限'));
+    assert.equal(w.postCalls().length, 0); // 始终不发半截 review
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('review：失败一次 → attempts=1、按第一档退避把 not_before 推后 60 秒', async () => {
+  const w = createWorld({ claude: { code: 1, stderr: 'Error: service unavailable (503)' } });
+  try {
+    const harness = createCliHarness(w.fake, w.tmp, w.clock);
+    const code = await runCli(['review', REPO, String(PR_NO)], { ctx: harness.ctx });
+    assert.equal(code, 1);
+    const state = openCommandState(harness);
+    try {
+      const job = listJobs(state)[0];
+      assert.ok(job !== undefined);
+      assert.equal(job.status, 'queued');
+      assert.equal(job.attempts, 1);
+      assert.equal(job.startedAt, null);
+      // NON_PEAK_AT（00:00:00Z）+ 第一档退避 60s
+      assert.equal(job.notBefore, '2026-10-12T00:01:00.000Z');
+    } finally {
+      state.close();
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('review：闸门未通过（waiting）→ 领取的任务放回 queued，不卡在 running（#33）', async () => {
+  const w = createWorld({ paused: true });
+  try {
+    const harness = createCliHarness(w.fake, w.tmp, w.clock);
+    const code = await runCli(['review', REPO, String(PR_NO)], { ctx: harness.ctx });
+    assert.equal(code, 0);
+    assert.ok(harness.stdout().includes('暂不启动审查'));
+    const state = openCommandState(harness);
+    try {
+      const job = listJobs(state)[0];
+      assert.ok(job !== undefined);
+      assert.equal(job.status, 'queued'); // 领取过但闸门未过：放回队列
+      assert.equal(job.startedAt, null);
+      assert.equal(job.attempts, 1);
+    } finally {
+      state.close();
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('review --dry-run：预览后任务放回 queued（不卡 running、不占去重键），再真实跑可发布（#33）', async () => {
+  const w = createWorld();
+  try {
+    const harness = createCliHarness(w.fake, w.tmp, w.clock);
+    const code = await runCli(['review', REPO, String(PR_NO), '--dry-run'], { ctx: harness.ctx });
+    assert.equal(code, 0);
+    const state = openCommandState(harness);
+    try {
+      const job = listJobs(state)[0];
+      assert.ok(job !== undefined);
+      assert.equal(job.status, 'queued');
+      assert.equal(job.startedAt, null);
+      assert.equal(job.attempts, 1);
+    } finally {
+      state.close();
+    }
+
+    // 同一任务行再真实跑一次：正常发布并标记 done
+    const second = await runCli(['review', REPO, String(PR_NO)], { ctx: harness.ctx });
+    assert.equal(second, 0);
+    assert.equal(w.postCalls().length, 1);
+    const state2 = openCommandState(harness);
+    try {
+      const job = listJobs(state2)[0];
+      assert.ok(job !== undefined);
+      assert.equal(job.status, 'done');
+      assert.equal(job.reviewUrl, REVIEW_URL);
+    } finally {
+      state2.close();
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
