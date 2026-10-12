@@ -99,6 +99,26 @@ test('REVIEW_JSON_SCHEMA 是纯 JSON 值，可序列化往返且结构完备', (
   assert.equal(itemProps.body.maxLength, BODY_MAX_LENGTH);
 });
 
+test('REVIEW_JSON_SCHEMA 不含 $schema 元键（claude --json-schema 会拒绝元 schema URI）', () => {
+  const schema = REVIEW_JSON_SCHEMA as Record<string, unknown>;
+  // 顶层不带（#31：本机 claude CLI 的校验器不认识 2020-12 的元 URI，带上整次调用被拒）
+  assert.equal('$schema' in schema, false);
+  assert.equal(schema.$schema, undefined);
+  // 递归也没有：任何层级都不该出现 $schema（防止将来在子 schema 里加回来）
+  const collectKeys = (value: unknown, acc: string[] = []): string[] => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => collectKeys(item, acc));
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, sub] of Object.entries(value as Record<string, unknown>)) {
+        acc.push(key);
+        collectKeys(sub, acc);
+      }
+    }
+    return acc;
+  };
+  assert.ok(!collectKeys(REVIEW_JSON_SCHEMA).includes('$schema'));
+});
+
 test('合法样例通过 REVIEW_JSON_SCHEMA 校验（3 个）', () => {
   const samples: unknown[] = [
     // 没有问题：findings 为空数组

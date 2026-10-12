@@ -18,9 +18,15 @@ export const BODY_MAX_LENGTH = 800;
 /** suggestion 长度上限（字）：issue 未规定，防御性截断，避免超长替换代码撑爆评论。 */
 export const SUGGESTION_MAX_LENGTH = 2000;
 
-/** 模型审查输出的 JSON Schema（draft 2020-12 子集，只用手写校验支持的关键字）。 */
+/**
+ * 模型审查输出的 JSON Schema（draft 2020-12 子集，只用手写校验支持的关键字）。
+ *
+ * 故意不带 `$schema` 元键：本机 claude CLI 的 `--json-schema` 校验器不认识
+ * 2020-12（draft-07 也不认）的元 schema URI，带上会整次调用被拒绝
+ * （「no schema with key or ref」）。元键本身不约束数据，去掉不影响校验语义；
+ * 这里导出的就是最终送进 `claude --json-schema` 的形态（见 #31）。
+ */
 export const REVIEW_JSON_SCHEMA: Record<string, unknown> = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   title: 'glm-review 审查结果',
   description: '代码审查的结构化输出：整体评价 + 问题列表。没有问题时 findings 为空数组。',
   type: 'object',
