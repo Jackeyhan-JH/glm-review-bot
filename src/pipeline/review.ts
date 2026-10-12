@@ -143,17 +143,6 @@ function renderFilesVar(parts: FileSlice[]): string {
   return parts.map((part) => `- ${part.path}${renderFileSlice(part)[1]}`).join('\n');
 }
 
-/**
- * 去掉 schema 顶层的 `$schema` 元键再交给 claude：本机 claude CLI 的
- * --json-schema 校验器不认识 2020-12 的元 schema URI，带上会整次调用被
- * 拒绝（「no schema with key or ref」）。#9 的 REVIEW_JSON_SCHEMA 保留该键
- * 作文档用途，这里在调用边界剥掉，校验语义不受影响（元键本身不约束数据）。
- */
-function stripMetaSchema<T extends Record<string, unknown>>(schema: T): Record<string, unknown> {
-  const { $schema: _omit, ...rest } = schema;
-  return rest;
-}
-
 /** 模型输出里的 summary（非字符串或缺省 → undefined，合并时跳过）。 */
 function summaryOf(raw: unknown): string | undefined {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
@@ -341,7 +330,9 @@ export async function reviewPr(input: ReviewPrInput, deps: ReviewPipelineDeps): 
             cwd: checkoutDir,
             model,
             effort: config.claude.effort,
-            jsonSchema: stripMetaSchema(REVIEW_JSON_SCHEMA),
+            // schema.ts 导出的 schema 本身已不带 $schema 元键（#31：claude 的
+            // --json-schema 校验器拒绝元 schema URI），无需再在调用边界剥离。
+            jsonSchema: REVIEW_JSON_SCHEMA,
             timeoutMs: config.claude.timeoutSec * 1000,
           },
           { exec: deps.exec, env: deps.env, onCall },
