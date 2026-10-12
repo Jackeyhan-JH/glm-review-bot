@@ -11,9 +11,15 @@
  * gh / git / 配置加载等基础设施错误仍然抛出，由调用方（CLI / #13 守护进程）兜底。
  *
  * 状态库由调用方打开并经 deps.state 注入（命令层负责生命周期）；任务行在 getPr 与
- * superseded 检查之后创建（同键去重，已存在则复用），之后所有状态变更（defer /
- * markSkipped / markFailed / markDone）都落在这行上。每次 claude 调用（含失败与
- * 就地重试的每一次）都写 calls 表。
+ * superseded 检查之后创建（同键去重，已存在则复用），之后的状态变更（defer /
+ * markSkipped / markDone）都落在这行上。每次 claude 调用（含失败与就地重试的每一次）
+ * 都写 calls 表。
+ *
+ * #33：reviewPr **不领取任务、不记录失败**——attempts 只在领取（claimNext / claimJob）
+ * 时 +1，markFailed 按它判断退避与终态；reviewPr 内部调 markFailed 会让没领取过的任务
+ * attempts 恒为 0、永远进不了终态 failed。领取与失败记录归调用方：CLI `review` 路径用
+ * src/pipeline/claim.ts 的 claimJob / settleClaimedReview，#13 的 worker 用自己的
+ * claimNext + markFailed。
  */
 import { loadGlobalConfig, type GlobalConfig } from '../config/global.ts';
 import { isIgnoredByRepoConfig, loadRepoConfig, type RepoConfigResult } from '../config/repo.ts';
@@ -50,7 +56,7 @@ import { buildReview } from '../publish/build.ts';
 import { publishReview } from '../publish/post.ts';
 import { recordCall } from '../state/calls.ts';
 import type { StateDb } from '../state/db.ts';
-import { defer, enqueue, isReviewed, markDone, markFailed, markSkipped } from '../state/jobs.ts';
+import { defer, enqueue, isReviewed, markDone, markSkipped } from '../state/jobs.ts';
 import { deferUntil, isPeak } from '../peak/peak.ts';
 
 /** reviewPr 的输入（与 issue #11 约定一致）。 */
@@ -105,7 +111,8 @@ export type ReviewOutcome =
   | { status: 'deferred'; until: string; jobId: number }
   | { status: 'waiting'; reason: 'paused' | 'box-busy' | 'self-busy'; detail: string; jobId: number }
   | { status: 'skipped'; reason: SkipReason; jobId: number }
-  | { status: 'failed'; error: string; requeued: boolean; jobId: number };
+  /** 审查失败：任务状态未被改动（不领取、不 markFailed），由调用方记录，见 #33 与 claim.ts。 */
+  | { status: 'failed'; error: string; jobId: number };
 
 /** 阶段进度的中文标签（progress 回调与结构化日志共用）。 */
 const STAGE_LABEL: Record<string, string> = {
@@ -287,7 +294,8 @@ export async function reviewPr(input: ReviewPrInput, deps: ReviewPipelineDeps): 
     truncatedFiles: plan.truncated.length,
   });
 
-  // 6. 只读检出 + 逐块审查（失败就地重试，仍失败 → 整个任务失败，不发半截 review）。
+  // 6. 只读检出 + 逐块审查（失败就地重试，仍失败 → 整个任务失败，不发半截 review；
+  //    失败不落任务状态，由调用方领取后 markFailed 记录，见 #33）。
   const checkoutDir = await stage('checkout', jobBase, () => ensureCheckout(deps, input.repo, pr.headSha));
   const prBody = truncatePrBody(await fetchPrBody(deps, input.repo, input.pr, log));
   const template = loadPromptTemplate(repoConfig.config.language);
@@ -343,12 +351,12 @@ export async function reviewPr(input: ReviewPrInput, deps: ReviewPipelineDeps): 
     );
     if (!result.ok) {
       const error = result.error ?? 'claude 调用失败';
-      const failed = markFailed(state, job.id, error, {
-        now: now(),
-        retry: { maxAttempts: config.retry.maxAttempts, backoffSeconds: config.retry.backoffSec },
+      log.error('块审查失败，任务状态交由调用方记录（reviewPr 不再 markFailed，#33）', {
+        ...jobBase,
+        chunk: chunkNo,
+        err: error,
       });
-      log.error('块审查失败，任务按重试策略处理', { ...jobBase, chunk: chunkNo, err: error, status: failed.status });
-      return { status: 'failed', error, requeued: failed.status === 'queued', jobId: failed.id };
+      return { status: 'failed', error, jobId: job.id };
     }
     const normalized = normalizeFindings(result.output, chunkFiles, { ignoredPaths });
     if (normalized.dropped.length > 0) {

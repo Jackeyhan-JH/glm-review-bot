@@ -169,21 +169,22 @@ test('GLM_PAUSE 存在 → waiting: paused，不调用 claude，任务保持排�
   }
 });
 
-test('一块 claude 持续失败 → 不发 review，任务按重试策略回到 queued，失败调用也记账', async () => {
+test('一块 claude 持续失败 → 不发 review，reviewPr 不改任务状态（#33：失败由调用方记录）', async () => {
   const w = createWorld({ claude: { code: 1, stderr: 'Error: service unavailable (503), overloaded' } });
   try {
     const outcome = await w.run();
     assert.equal(outcome.status, 'failed');
-    assert.equal(outcome.requeued, true);
     assert.ok(outcome.error.includes('claude'));
 
     // 不发半截 review
     assert.equal(w.postCalls().length, 0);
 
-    // 任务回到 queued（未达重试上限），原因记录错误信息
+    // reviewPr 不再 markFailed：任务保持入队时的原状（queued、attempts 0、无失败原因），
+    // 领取与失败记录归调用方（见 claim.test.ts 与 review-command.test.ts）
     const job = getJob(w.state, outcome.jobId);
     assert.equal(job.status, 'queued');
-    assert.ok(job.reason !== null && job.reason.includes('claude'));
+    assert.equal(job.attempts, 0);
+    assert.equal(job.reason, null);
 
     // 就地重试（默认 2 次）每次都进了账本
     const calls = listCalls(w.state);
