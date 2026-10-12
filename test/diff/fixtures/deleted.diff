@@ -1,0 +1,9 @@
+diff --git a/doomed.txt b/doomed.txt
+deleted file mode 100644
+index bff3833..0000000
+--- a/doomed.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-to be removed line A
+-to be removed line B
+\ No newline at end of file

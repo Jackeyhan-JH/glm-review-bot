@@ -1,0 +1,22 @@
+diff --git a/grid.txt b/grid.txt
+index 9d54c21..e8de8bb 100644
+--- a/grid.txt
++++ b/grid.txt
+@@ -2,7 +2,7 @@ row 1
+ row 2
+ row 3
+ row 4
+-row 5
++row 5 edited
+ row 6
+ row 7
+ row 8
+@@ -52,7 +52,7 @@ row 51
+ row 52
+ row 53
+ row 54
+-row 55
++row 55 edited
+ row 56
+ row 57
+ row 58
