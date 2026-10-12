@@ -48,6 +48,11 @@ test('端到端：正常审查一次 → POST 一条 review（含标记与行内
     assert.ok(claude[0]?.cwd.includes(HEAD_SHA.slice(0, 7)));
     assert.ok(claude[0]?.stdin.includes('### 文件: src/calc.ts'));
     assert.ok(claude[0]?.stdin.includes('支持多币种分账'));
+    // --json-schema 不带 $schema 元键（本机 claude 校验器拒绝 2020-12 元 URI）
+    const schemaArg = claude[0]?.argv[claude[0].argv.indexOf('--json-schema') + 1] ?? '';
+    const schema = JSON.parse(schemaArg) as Record<string, unknown>;
+    assert.equal('$schema' in schema, false);
+    assert.ok('findings' in (schema.properties as Record<string, unknown>));
 
     // calls 表有对应记录
     const calls = listCalls(w.state);

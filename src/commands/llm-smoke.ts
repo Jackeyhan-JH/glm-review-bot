@@ -22,9 +22,12 @@ const SMOKE_PROMPT =
   '这是一次冒烟测试。请只输出一个 JSON 对象（不要输出其他文字、不要用代码块包裹）：' +
   '{"ok": true, "message": "一句中文问候"}';
 
-/** 冒烟输出的 JSON Schema（与提示词约定一致）。 */
+/**
+ * 冒烟输出的 JSON Schema（与提示词约定一致）。注意不带 `$schema` 元键：
+ * 本机 claude CLI 的 --json-schema 校验器不认识 2020-12 的元 schema URI，
+ * 带上会直接报「no schema with key or ref」拒绝执行。
+ */
 const SMOKE_SCHEMA: Record<string, unknown> = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   title: 'glm-review 冒烟测试',
   type: 'object',
   additionalProperties: false,

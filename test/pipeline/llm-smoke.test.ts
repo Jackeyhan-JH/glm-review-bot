@@ -46,6 +46,11 @@ test('llm-smoke：非高峰成功 → 退出码 0，打印模型、耗时、toke
     assert.ok(calls[0]?.argv.includes('--model'));
     assert.ok(calls[0]?.argv.includes('Read'));
     assert.ok(calls[0]?.stdin.includes('冒烟测试'));
+    // --json-schema 不带 $schema 元键（本机 claude 校验器拒绝 2020-12 元 URI）
+    const schemaArg = calls[0]?.argv[calls[0].argv.indexOf('--json-schema') + 1] ?? '';
+    const schema = JSON.parse(schemaArg) as Record<string, unknown>;
+    assert.equal('$schema' in schema, false);
+    assert.ok('ok' in (schema.properties as Record<string, unknown>));
   } finally {
     env.cleanup();
   }
