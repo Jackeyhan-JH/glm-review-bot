@@ -22,7 +22,7 @@ Omitted 1 lower-severity finding(s) below the severity threshold.
 
 <!-- glm-review-bot:sha=9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c -->
 
------ 行内评论 1/2 · src/calc.ts:12 -----
+----- 行内评论 1/2 · `src/calc.ts:12` -----
 
 **[major] Missing null check**
 
@@ -34,7 +34,7 @@ const total = (a ?? {}).total;
 
 <sub>🤖 glm-review-bot · glm-5.3-flash</sub>
 
------ 行内评论 2/2 · src/util.ts:5 -----
+----- 行内评论 2/2 · `src/util.ts:5` -----
 
 **[nit] Inconsistent naming**
 

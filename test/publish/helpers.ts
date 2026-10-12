@@ -15,6 +15,7 @@ import { exec, type ExecFn, type ExecResult } from '../../src/lib/exec.ts';
 import { nullLogger } from '../../src/lib/log.ts';
 import { resolvePaths } from '../../src/lib/paths.ts';
 import type { PrInfo } from '../../src/lib/types.ts';
+import { commentLocation } from '../../src/publish/format.ts';
 import type { PublishDeps } from '../../src/publish/post.ts';
 import type { Lang, ReviewMeta } from '../../src/publish/types.ts';
 import type { FakeBin } from '../helpers/fakebin.ts';
@@ -100,11 +101,7 @@ export function renderForSnapshot(
 ): string {
   const parts = [review.body];
   review.comments.forEach((comment, index) => {
-    const range =
-      comment.startLine !== undefined && comment.startLine < comment.line
-        ? `${comment.startLine}-${comment.line}`
-        : `${comment.line}`;
-    parts.push(`\n----- 行内评论 ${index + 1}/${review.comments.length} · ${comment.path}:${range} -----\n`);
+    parts.push(`\n----- 行内评论 ${index + 1}/${review.comments.length} · ${commentLocation(comment)} -----\n`);
     parts.push(comment.body);
   });
   return `${parts.join('\n')}\n`;

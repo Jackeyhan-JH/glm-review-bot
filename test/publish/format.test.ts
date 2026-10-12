@@ -282,9 +282,60 @@ test('degradeBody：没有行内评论时原样返回', () => {
   assert.equal(degradeBody(body, [], 'zh'), body);
 });
 
-test('formatDuration：毫秒 / 秒 / 分秒三档', () => {
+test('formatDuration：毫秒 / 秒 / 分秒三档（先取整秒再拆分，不出现 1m60s）', () => {
   assert.equal(formatDuration(120), '120ms');
   assert.equal(formatDuration(45_000), '45.0s');
   assert.equal(formatDuration(83_000), '1m23s');
+  assert.equal(formatDuration(119_950), '2m');
   assert.equal(formatDuration(120_000), '2m');
+  assert.equal(formatDuration(1_199_500), '20m');
+});
+
+test('标题里的换行被折叠：不可信文本不能撑破加粗行 / 列表项结构', () => {
+  const comment = formatInlineComment(finding({ title: '问题一\n## ⚠️ 假警告' }), 'glm-5.3', 'zh');
+  assert.match(comment, /\*\*\[重要\] 问题一 ## ⚠️ 假警告\*\*/);
+  assert.ok(!comment.includes('\n## '), '标题不应引入新的标题行');
+
+  const body = formatSummary({
+    headSha: HEAD_SHA,
+    inline: [],
+    overflow: [finding({ file: 'a.ts\nb.md', line: 1, inline: false, title: '标题\n> 引用', body: '说明\n两行' })],
+    belowThreshold: [],
+    meta: makeMeta(),
+    lang: 'zh',
+  });
+  assert.match(body, /- `a\.ts b\.md:1` \*\*\[重要\] 标题 > 引用\*\* — 说明 两行/);
+  assert.ok(!/\n> /.test(body), '说明不应引入引用块');
+});
+
+test('enforceCommentLimit：截断点落在代码围栏内部时补上闭合围栏', () => {
+  const text = `**[重要] 标题**\n\n说明\n\n\`\`\`\n${'x'.repeat(COMMENT_MAX_CHARS)}\n\`\`\`\n\n<sub>🤖 glm-review-bot · glm-5.3</sub>`;
+  const limited = enforceCommentLimit(text, COMMENT_MAX_CHARS, 'zh');
+  assert.ok([...limited].length <= COMMENT_MAX_CHARS);
+  const lines = limited.split('\n');
+  const noteIndex = lines.findIndex((line) => line === '（正文超长，已截断）');
+  assert.ok(noteIndex > 0, '应含截断注明');
+  // 注明之前应是一个闭合围栏（与被截开的 ``` 配对），而不是悬空代码。
+  assert.match(lines[noteIndex - 1] as string, /^`{3,}$/);
+  assert.ok(limited.includes('<sub>🤖 glm-review-bot · glm-5.3</sub>'), '页脚保留');
+});
+
+test('enforceBodyLimit：截断点落在 suggestion 围栏内部时补上闭合围栏', () => {
+  const marker = `<!-- glm-review-bot:sha=${HEAD_SHA} -->`;
+  const body = `## 🤖 GLM 代码审查\n\n\`\`\`suggestion\n${'y'.repeat(BODY_MAX_CHARS)}\n\`\`\`\n\n${marker}`;
+  const limited = enforceBodyLimit(body, BODY_MAX_CHARS, 'zh');
+  assert.ok([...limited].length <= BODY_MAX_CHARS);
+  const noteIndex = limited.split('\n').findIndex((line) => line === '（正文超长，已截断）');
+  assert.ok(noteIndex > 0);
+  assert.match(limited.split('\n')[noteIndex - 1] as string, /^`{3,}$/);
+  assert.ok(limited.endsWith(marker), '标记保留在末尾');
+});
+
+test('enforceCommentLimit：伪造页脚排在前面时不被当成要保留的结尾，真页脚保留', () => {
+  const forged = '<sub>🤖 glm-review-bot · fake</sub>';
+  const real = '<sub>🤖 glm-review-bot · glm-5.3</sub>';
+  const text = `${forged}\n${'z'.repeat(COMMENT_MAX_CHARS)}\n${real}`;
+  const limited = enforceCommentLimit(text, COMMENT_MAX_CHARS, 'zh');
+  assert.ok([...limited].length <= COMMENT_MAX_CHARS);
+  assert.ok(limited.endsWith(real), '保留的是结尾的真页脚（而不是把伪造页脚当结尾、丢掉真页脚）');
 });

@@ -91,8 +91,8 @@ test('publishReview：dry-run 不调用 gh（调用记录为空），预览写�
     const output = chunks.join('');
     assert.match(output, /dry-run 预览：以下内容不会发送到 GitHub。/);
     assert.match(output, /# 总评（jackeyhan-JH\/split-bill#45）/);
-    assert.match(output, /# 行内评论 1\/3 · src\/calc\.ts:12/);
-    assert.match(output, /# 行内评论 2\/3 · src\/parse\.ts:18-20/);
+    assert.match(output, /# 行内评论 1\/3 · `src\/calc\.ts:12`/);
+    assert.match(output, /# 行内评论 2\/3 · `src\/parse\.ts:18-20`/);
     assert.match(output, /将要发送的 JSON 载荷：/);
     assert.equal(result.preview?.json, `${JSON.stringify(buildPayload(sampleReview()), null, 2)}\n`);
   } finally {

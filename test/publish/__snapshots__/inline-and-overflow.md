@@ -29,7 +29,7 @@
 
 <!-- glm-review-bot:sha=9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c -->
 
------ 行内评论 1/3 · src/calc.ts:12 -----
+----- 行内评论 1/3 · `src/calc.ts:12` -----
 
 **[严重] 除零未防护**
 
@@ -37,7 +37,7 @@
 
 <sub>🤖 glm-review-bot · glm-5.3</sub>
 
------ 行内评论 2/3 · src/parse.ts:18-20 -----
+----- 行内评论 2/3 · `src/parse.ts:18-20` -----
 
 **[重要] 解析失败被吞掉**
 
@@ -45,7 +45,7 @@ JSON.parse 抛错后只打了日志，上游拿到 undefined。
 
 <sub>🤖 glm-review-bot · glm-5.3</sub>
 
------ 行内评论 3/3 · src/util.ts:5 -----
+----- 行内评论 3/3 · `src/util.ts:5` -----
 
 **[一般] 重复的正则编译**
 

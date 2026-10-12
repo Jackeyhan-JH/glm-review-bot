@@ -28,7 +28,7 @@
 
 <!-- glm-review-bot:sha=9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c -->
 
------ 行内评论 1/2 · src/calc.ts:12 -----
+----- 行内评论 1/2 · `src/calc.ts:12` -----
 
 **[重要] 空指针未判断**
 
@@ -40,7 +40,7 @@ const total = (a ?? {}).total;
 
 <sub>🤖 glm-review-bot · glm-5.3</sub>
 
------ 行内评论 2/2 · src/parse.ts:18-22 -----
+----- 行内评论 2/2 · `src/parse.ts:18-22` -----
 
 **[一般] 建议抽成函数**
 

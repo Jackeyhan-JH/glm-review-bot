@@ -29,8 +29,8 @@ const MARKER_IN_TEXT = /<!--\s*glm-review-bot:sha=[0-9a-fA-F]+\s*-->/;
 /** 不可信文本里可能出现的任何 glm-review-bot 隐藏标记（含伪造变体）。 */
 const FORGED_MARKER = /<!--\s*glm-review-bot:[^>]*?-->/g;
 
-/** 行内评论页脚（截断时保留）。 */
-const COMMENT_FOOTER = /<sub>🤖 glm-review-bot · [^\n]*<\/sub>/;
+/** 行内评论页脚（截断时保留；合并进总评时全部剥掉）。 */
+const COMMENT_FOOTER = /<sub>🤖 glm-review-bot · [^\n]*<\/sub>/g;
 
 const EN_SEVERITY: Record<Severity, string> = {
   blocker: 'blocker',
@@ -56,6 +56,21 @@ export function severityLabel(severity: Severity, lang: Lang): string {
 /** 剥离不可信文本里的 glm-review-bot 隐藏标记（防伪造去重标记）。 */
 export function stripBotMarkers(text: string): string {
   return text.replace(FORGED_MARKER, '');
+}
+
+/** 压成一行（去注释标记 + 折叠空白）：标题、文件路径等单行字段统一走这里，
+ *  防止不可信文本里的换行把列表项 / 加粗行撑破、注入别的 markdown 结构。 */
+function oneLine(text: string): string {
+  return stripBotMarkers(text).replace(/\s+/g, ' ').trim();
+}
+
+/** 取最后一个匹配（页脚 / 标记取最后一个：我们自己追加的才在最后，
+ *  不可信文本里伪造的同形片段排在前面，不该被当成要保留的结尾）。 */
+function lastMatch(text: string, pattern: RegExp): string | undefined {
+  const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+  let last: string | undefined;
+  for (const match of text.matchAll(global)) last = match[0];
+  return last;
 }
 
 /** 字符数按 Unicode 码点计（emoji / CJK 不会被拆成半个）。 */
@@ -102,12 +117,13 @@ export function suggestionFits(finding: NormalizedFinding): boolean {
   return suggestion.trimEnd().split('\n').length === commentSpan(finding);
 }
 
-/** 耗时显示：<1s 用毫秒，<1min 用秒（一位小数），再往上用分秒。 */
+/** 耗时显示：<1s 用毫秒，<1min 用秒（一位小数），再往上用分秒（先取整秒再拆，避免 1m60s）。 */
 export function formatDuration(ms: number): string {
   if (ms < 1_000) return `${Math.max(0, Math.round(ms))}ms`;
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1_000);
+  const totalSeconds = Math.round(ms / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`;
 }
 
@@ -122,25 +138,59 @@ function commentFooter(model: string): string {
 }
 
 /**
+ * 截断点若落在代码围栏内部，围栏后面的注明 / 页脚 / 标记会被 GitHub 当成
+ * 代码内容渲染（行内评论里甚至会被并进一键替换的代码）。按 CommonMark 规则
+ * 扫描未闭合的围栏，返回需要补上的闭合围栏（无则空串）。
+ */
+function unclosedFenceCloser(text: string): string {
+  let open: { char: string; length: number } | undefined;
+  for (const line of text.split('\n')) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (match === null) continue;
+    const fence = match[1] as string;
+    const info = match[2] ?? '';
+    if (open === undefined) {
+      // 反引号围栏的 info string 里不能出现反引号，否则这不是围栏。
+      if (fence[0] === '`' && info.includes('`')) continue;
+      open = { char: fence[0] as string, length: fence.length };
+    } else if (fence[0] === open.char && fence.length >= open.length && info.trim() === '') {
+      open = undefined;
+    }
+  }
+  return open === undefined ? '' : open.char.repeat(open.length);
+}
+
+/**
  * 截断到 max 字符并注明；`tail` 是必须保留的结尾片段（去重标记 / 页脚），
- * 不在结尾或不存在时放弃保留。截断后总长恒 ≤ max。
+ * 不在结尾或不存在时放弃保留。截断处补齐未闭合的代码围栏，截断后总长恒 ≤ max。
  */
 function truncatePreserving(text: string, max: number, lang: Lang, tail?: string): string {
   if (cpLength(text) <= max) return text;
+  const note = truncationNote(lang);
   const keep = tail !== undefined && text.endsWith(tail) ? `\n${tail}` : '';
-  const budget = max - cpLength(truncationNote(lang)) - 1 - cpLength(keep);
-  const clipped = clipCp(text, Math.max(budget, 0)).trimEnd();
-  return `${clipped}\n${truncationNote(lang)}${keep}`;
+  const assemble = (budget: number): string => {
+    const clipped = clipCp(text, Math.max(budget, 0)).trimEnd();
+    const closer = unclosedFenceCloser(clipped);
+    return `${clipped}${closer === '' ? '' : `\n${closer}`}\n${note}${keep}`;
+  };
+  let budget = max - cpLength(note) - 1 - cpLength(keep);
+  let candidate = assemble(budget);
+  while (cpLength(candidate) > max && budget > 0) {
+    // 补闭合围栏可能又超了一点：继续收缩预算直到装得下。
+    budget -= Math.max(1, cpLength(candidate) - max);
+    candidate = assemble(budget);
+  }
+  return candidate;
 }
 
 /** 总评截断（保留去重标记——它丢了去重就失效）。 */
 export function enforceBodyLimit(body: string, max: number, lang: Lang): string {
-  return truncatePreserving(body, max, lang, MARKER_IN_TEXT.exec(body)?.[0]);
+  return truncatePreserving(body, max, lang, lastMatch(body, MARKER_IN_TEXT));
 }
 
-/** 行内评论截断（保留署名页脚）。 */
+/** 行内评论截断（保留署名页脚；结尾的才是我们追加的，伪造的不算）。 */
 export function enforceCommentLimit(text: string, max: number, lang: Lang): string {
-  return truncatePreserving(text, max, lang, COMMENT_FOOTER.exec(text)?.[0]);
+  return truncatePreserving(text, max, lang, lastMatch(text, COMMENT_FOOTER));
 }
 
 /**
@@ -149,7 +199,7 @@ export function enforceCommentLimit(text: string, max: number, lang: Lang): stri
  */
 export function formatInlineComment(finding: NormalizedFinding, model: string, lang: Lang): string {
   const zh = lang === 'zh';
-  const title = stripBotMarkers(finding.title).trim();
+  const title = oneLine(finding.title);
   const body = stripBotMarkers(finding.body).trim();
   const suggestion = stripBotMarkers(finding.suggestion ?? '').trim();
 
@@ -171,13 +221,13 @@ export function formatInlineComment(finding: NormalizedFinding, model: string, l
 /** `文件:行`（多行发现显示 `文件:起-止`）。 */
 function locationOf(file: string, line: number, endLine?: number): string {
   const range = endLine !== undefined && endLine > line ? `${line}-${endLine}` : `${line}`;
-  return `\`${file}:${range}\``;
+  return `\`${oneLine(file)}:${range}\``;
 }
 
-/** 列表项形态的发现：`文件:行` + 严重度标题 + 说明（说明压成一行，避免打断列表）。 */
+/** 列表项形态的发现：`文件:行` + 严重度标题 + 说明（标题与说明压成一行，避免打断列表）。 */
 function findingItem(finding: NormalizedFinding, lang: Lang): string {
-  const body = stripBotMarkers(finding.body).trim().replace(/\s+/g, ' ');
-  const head = `${locationOf(finding.file, finding.line, finding.endLine)} **[${severityLabel(finding.severity, lang)}] ${stripBotMarkers(finding.title).trim()}**`;
+  const body = oneLine(finding.body);
+  const head = `${locationOf(finding.file, finding.line, finding.endLine)} **[${severityLabel(finding.severity, lang)}] ${oneLine(finding.title)}**`;
   return body === '' ? `- ${head}` : `- ${head} — ${body}`;
 }
 
@@ -289,16 +339,16 @@ export function formatSummary(input: SummaryInput): string {
   return enforceBodyLimit(parts.join('\n'), BODY_MAX_CHARS, input.lang);
 }
 
-/** 行内评论并入总评时的定位前缀（`文件:起-止`，与 InlineComment 的行号对应）。 */
-function commentLocation(comment: InlineComment): string {
+/** 行内评论的定位（`文件:起-止`，与 InlineComment 的行号对应；预览页复用）。 */
+export function commentLocation(comment: InlineComment): string {
   const range =
     comment.startLine !== undefined && comment.startLine < comment.line
       ? `${comment.startLine}-${comment.line}`
       : `${comment.line}`;
-  return `\`${comment.path}:${range}\``;
+  return `\`${oneLine(comment.path)}:${range}\``;
 }
 
-/** 422 降级时把行内评论并进总评的段落：逐条列出定位 + 评论正文（去掉重复页脚）。 */
+/** 422 降级时把行内评论并进总评的段落：逐条列出定位 + 评论正文（去掉全部页脚，含伪造的）。 */
 export function degradeSection(comments: InlineComment[], lang: Lang): string {
   const zh = lang === 'zh';
   const items = comments.map((comment) => {

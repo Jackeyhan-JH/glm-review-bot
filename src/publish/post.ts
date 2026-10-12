@@ -14,7 +14,7 @@ import { ReviewRejectedError } from '../github/errors.ts';
 import { postReview } from '../github/reviews.ts';
 import type { GithubDeps } from '../github/run.ts';
 import type { RepoSlug } from '../lib/types.ts';
-import { degradeBody, fenceOf } from './format.ts';
+import { commentLocation, degradeBody, fenceOf } from './format.ts';
 import type { BuiltReview } from './types.ts';
 
 /** 发布依赖：#6 的依赖集合 + dry-run 预览输出函数。 */
@@ -86,13 +86,9 @@ function renderPreviewMarkdown(review: BuiltReview, repo: RepoSlug, number: numb
   ];
   const total = review.comments.length;
   review.comments.forEach((comment, index) => {
-    const range =
-      comment.startLine !== undefined && comment.startLine < comment.line
-        ? `${comment.startLine}-${comment.line}`
-        : `${comment.line}`;
     const label = zh
-      ? `# 行内评论 ${index + 1}/${total} · ${comment.path}:${range}`
-      : `# Inline comment ${index + 1}/${total} · ${comment.path}:${range}`;
+      ? `# 行内评论 ${index + 1}/${total} · ${commentLocation(comment)}`
+      : `# Inline comment ${index + 1}/${total} · ${commentLocation(comment)}`;
     lines.push('', '---', '', label, '', comment.body);
   });
   lines.push('');
