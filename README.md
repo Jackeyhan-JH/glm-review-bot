@@ -27,6 +27,17 @@ glm-review status                               # 队列与最近审查
 glm-review usage --since 7d                     # 调用与用量统计
 ```
 
+## 开发
+
+```bash
+nvm use                 # Node 24（见 .nvmrc）
+npm ci                  # 安装依赖
+npm run check           # typecheck + test，提 PR 前必须全绿
+./bin/glm-review help   # 直接运行 CLI（Node 24 直接运行 .ts 源码，无需编译）
+```
+
+TypeScript 由 Node 直接运行（无编译、无 dist），只允许可擦除语法；运行依赖仅 `yaml`，其余能力用 Node 内置模块。目录归属、如何新增子命令、如何写不碰真实 `gh` / `claude` 的测试，见 [CONTRIBUTING.md](CONTRIBUTING.md)；总体设计见 [issue #1](https://github.com/Jackeyhan-JH/glm-review-bot/issues/1)。
+
 ## 许可
 
 MIT
