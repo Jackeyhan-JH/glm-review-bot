@@ -21,9 +21,9 @@ export const HEAD_SHA = '9f2b1c3a4d5e6f708192a3b4c5d6e7f8091a2b3c';
 export const OTHER_SHA = '0123456789abcdef0123456789abcdef01234567';
 export const REVIEW_URL = `https://github.com/${REPO}/pull/45#pullrequestreview-77`;
 
-/** getPr 请求的字段串（与 src/github/prs.ts 的 PR_FIELDS 一致，fakebin 精确匹配用）。 */
+/** getPr 请求的字段串（与 src/github/prs.ts 的 PR_FIELDS 一致，fakebin 精确匹配用；不含 baseRefOid，见 #30）。 */
 const PR_FIELDS =
-  'number,title,author,url,headRefOid,baseRefOid,baseRefName,headRefName,isDraft,labels,updatedAt,state';
+  'number,title,author,url,headRefOid,baseRefName,headRefName,isDraft,labels,updatedAt,state';
 
 /** 默认假时钟：2026-10-12（周一）00:00Z = 北京 08:00，非高峰。 */
 export const NON_PEAK_AT = '2026-10-12T00:00:00Z';
