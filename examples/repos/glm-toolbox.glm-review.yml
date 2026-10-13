@@ -1,0 +1,19 @@
+# glm-toolbox（纯前端工具箱 PWA）的推荐仓库配置。
+# 放到该仓库默认分支根目录的 .glm-review.yml 即生效（本文件只是示例，不提交到该仓库）。
+# 未列出的字段用默认值（enabled / language: zh / minSeverity: minor / maxComments: 20 / …），
+# 内置忽略（锁文件、**/vendor/**、**/node_modules/**、**/*.min.*、**/*.map、二进制与图片
+# 扩展名等）总是生效，下面的 ignore 是在其之上叠加。
+
+ignore:
+  - docs/screenshots/**        # 截图（PNG 已被内置忽略覆盖，这里显式忽略整个目录）
+  - tools/zh-convert/data/**   # 生成的简繁字表 / 词表（zh-dict.json 体积大、机器生成）
+  - tools/*/fixtures/**        # 测试夹具数据
+  - assets/icons/**            # 生成的 PWA 图标（make-icons.mjs 产物）
+
+focus: |
+  每个 tools/<名称>/ 是一个独立小工具（index.mjs 入口、logic.mjs 纯函数、style.css、
+  tool.json 元数据、ui.e2e.mjs 端到端）。重点：logic.mjs 纯函数的边界与错误处理
+  （空串 / 超长输入 / 非法字符）；index.mjs 与 ui.e2e.mjs 里的 XSS——凡 innerHTML /
+  insertAdjacentHTML 必须确认用户输入转义；tool.json 与 scripts/lib/manifest.mjs、
+  assets/js/registry.mjs 的字段一致性；sw.js 与 manifest.webmanifest 的缓存版本
+  是否随资源更新；无障碍（label / aria / 键盘可达）不要回退。

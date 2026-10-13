@@ -1,0 +1,32 @@
+# glm-review-bot 全局配置：box 本机推荐值（与 `glm-review config init` 生成的默认值一致，
+# 删掉任意字段即回退默认值）。复制到 ~/.config/glm-review-bot/config.yml 即可用：
+#
+#   cp examples/config.yml ~/.config/glm-review-bot/config.yml
+#
+# 字段含义与默认值见 README「配置」一节；改完用 `glm-review config check` 校验。
+
+repos:                             # 白名单：只审这些仓库（owner/name），空列表 = 什么都不审
+  - Jackeyhan-JH/glm-toolbox
+  - Jackeyhan-JH/split-bill
+  - Jackeyhan-JH/glm-night-shift
+  - Jackeyhan-JH/glm-peak-clock
+pollIntervalSec: 120               # 轮询间隔（秒），≥ 30
+maxConcurrent: 1                   # 审查机器人自己同时跑的 claude 数，1–4
+boxClaudeLimit: 4                  # 本机 claude 进程总数上限（含其他团队的开发会话）
+pauseFile: /workspace/GLM_PAUSE    # 该文件存在期间不启动新的 claude（额度看门狗创建）
+models:
+  small: glm-5.3-flash             # 小 diff 用的模型
+  large: glm-5.3                   # 大 diff 用的模型
+  smallDiffLines: 300              # ≤ 此改动行数用 small
+claude:
+  bin: claude
+  effort: high                     # low / medium / high
+  timeoutSec: 900                  # 单次 claude 调用超时（秒）
+  maxChunkLines: 800               # 单次调用最多审多少行 diff
+  maxChunksPerReview: 8            # 超过就只审前 N 块并在总评里说明
+retry:
+  maxAttempts: 3                   # 连续失败 3 次进终态 failed
+  backoffSec: [60, 300, 1800]      # 每次失败后的退避间隔
+statusPort: 47180                  # 状态网页端口（只监听 127.0.0.1）
+peak:
+  enabled: true                    # 高峰期（工作日北京时间 14–18 点）不调用 GLM
