@@ -82,6 +82,8 @@ export interface DaemonWorldOptions {
   configExtra?: string[];
   /** 假 claude 的应答规则；缺省成功返回样例输出。 */
   claude?: FakeBinRule;
+  /** 轮询间隔秒数（写进全局配置；缺省 30）。 */
+  pollIntervalSec?: number;
 }
 
 /** 内存日志器：捕获全部日志行，测试可断言。 */
@@ -197,7 +199,7 @@ export function createDaemonWorld(options: DaemonWorldOptions = {}): DaemonWorld
   const repos = options.repos ?? [];
   const claudeRule = options.claude ?? { stdout: claudeEnvelope() };
 
-  writeConfig(tmp, repos, options.configExtra ?? []);
+  writeConfig(tmp, repos, options.configExtra ?? [], options.pollIntervalSec ?? 30);
   const config: GlobalConfig = loadGlobalConfig(tmp.configPath, { log });
   // 仓库配置缓存：deps 每次取用时的 ctx（rebuild 换 fakebin 后 env 已更新）。
   const repoConfigCache = createRepoConfigCache(() => ({
@@ -379,10 +381,10 @@ export function createDaemonWorld(options: DaemonWorldOptions = {}): DaemonWorld
 }
 
 /** 写全局配置：白名单 = repos 里出现的仓库，pauseFile / 各目录都在临时环境内。 */
-function writeConfig(tmp: TmpEnv, repos: RepoSpec[], extra: string[]): void {
+function writeConfig(tmp: TmpEnv, repos: RepoSpec[], extra: string[], pollIntervalSec: number): void {
   const lines = [
     ...(repos.length === 0 ? ['repos: []'] : ['repos:', ...repos.map((r) => `  - ${r.repo}`)]),
-    'pollIntervalSec: 30',
+    `pollIntervalSec: ${pollIntervalSec}`,
     `pauseFile: ${path.join(tmp.baseDir, 'GLM_PAUSE')}`,
     ...extra,
   ];
