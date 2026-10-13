@@ -1,0 +1,14 @@
+# glm-peak-clock（高峰期时钟网页 + CLI）的推荐仓库配置。仓库很小，全部可审。
+# 放到该仓库默认分支根目录的 .glm-review.yml 即生效（本文件只是示例，不提交到该仓库）。
+
+# 仓库小、改动少，问题再轻也想看到（默认值即 minor，这里显式写出来便于按需调整）
+minSeverity: nit
+
+focus: |
+  本项目是高峰期规则本身的参照实现。重点：src/peak.js 的高峰判断必须与
+  glm-review-bot 完全一致——周一至周五北京时间（Asia/Shanghai）14:00–18:00，
+  左闭右开，周末全天非高峰，绝不能按本地时区换算；src/schedule.js 一周时间表
+  与 src/plans.js 套餐倍率数字是否与 README 表格一致；src/app.js 倒计时跨时区 /
+  跨日的边界（23:59 翻转、周一切换）；index.html 与 src/app.js 的字段对应；
+  bin/peak-clock.mjs 的 --json 输出格式（peak / nextSwitch / msUntilSwitch）
+  是脚本比对契约，不能变。

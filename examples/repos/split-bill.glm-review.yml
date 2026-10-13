@@ -1,0 +1,16 @@
+# split-bill（Next.js 分账应用，books/ 下还有第二个子应用）的推荐仓库配置。
+# 放到该仓库默认分支根目录的 .glm-review.yml 即生效（本文件只是示例，不提交到该仓库）。
+# 锁文件（package-lock.json，含 books/ 子目录里的）已被内置忽略，无需重复配置。
+
+ignore:
+  - docs/wireframes/**         # 设计线框图
+  - .cursor/**                 # agent 技能与验收脚本，不属于人审范围
+  - public/**                  # 静态资源
+
+focus: |
+  金额一律以「分」为整数单位存储与计算（lib/amount.ts），禁止浮点直算。重点：
+  lib/split.ts 与 lib/settlement.ts 分摊算法的精度、零头归属与总额守恒；
+  lib/db.ts（books/lib/db.ts 同理）的 SQL 参数化与事务边界；app/api/** 与
+  books/app/api/** 路由的输入校验、权限与错误码；lib/share-link.ts 等分享链接
+  的不可猜测性；React 组件的服务端 / 客户端边界（'use client'）与列表 key；
+  e2e / tests 断言是否覆盖了改动的行为。

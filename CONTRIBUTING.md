@@ -1,6 +1,6 @@
 # 贡献指南
 
-本项目由 bot 指挥 Claude Code（GLM）开发。总体设计、技术约定与路线图见 [issue #1](https://github.com/Jackeyhan-JH/glm-review-bot/issues/1)；本文只讲日常开发需要知道的事。
+本项目由 bot 指挥 Claude Code（GLM）开发。总体设计、技术约定与路线图见 [issue #1](https://github.com/Jackeyhan-JH/glm-review-bot/issues/1)；模块关系与状态机见 [docs/architecture.md](docs/architecture.md)，本机运维见 [docs/operations.md](docs/operations.md)，使用与配置见 [README](README.md)；本文只讲日常开发需要知道的事。
 
 ## 本地命令
 

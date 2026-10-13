@@ -1,0 +1,13 @@
+# glm-night-shift（夜间任务调度 CLI + 状态页）的推荐仓库配置。
+# 放到该仓库默认分支根目录的 .glm-review.yml 即生效（本文件只是示例，不提交到该仓库）。
+
+ignore:
+  - docs/images/**             # 状态页截图
+
+focus: |
+  这是调度 Claude Code 夜间干活的 CLI（CommonJS 风格 .js，node:test 单测）。重点：
+  src/scheduler.js、src/gate.js、src/peak.js 的排队、峰谷判断与单实例锁的竞态；
+  src/db.js 的迁移与事务（better-sqlite3 同步 API 内不能再回调查询）；
+  src/runner.js / src/follow.js 拼接 shell 命令时的注入风险（一律数组传参、
+  不拼接字符串进 sh -c）；src/cli/*.js 参数解析与中文文案；src/server.js 状态页
+  只监听本机、HTML 转义；模板（templates/*.md）变更是否会破坏占位符替换。
