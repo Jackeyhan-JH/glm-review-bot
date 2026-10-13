@@ -9,7 +9,8 @@
  * - --once：只做一轮轮询 + 处理所有当前可执行任务后退出（不等待高峰 / 闸门 / 退避），
  *   便于测试与 cron；
  * - 持续模式每轮之间睡到「下一轮轮询 / 队列最早可执行 / 闸门重试 / 限流恢复」中
- *   最早的时刻（上限 pollIntervalSec），退出信号随时打断睡眠。
+ *   最早的时刻（上限 pollIntervalSec），退出信号随时打断睡眠，并取消在途的睡眠
+ *   计时器（#39）：race 先行返回后未清理的 setTimeout 会把进程占住到睡满为止。
  */
 import type { GlobalConfig } from '../config/global.ts';
 import type { GithubDeps } from '../github/index.ts';
@@ -96,6 +97,19 @@ function earliestOf(candidates: Array<Date | undefined>): Date | undefined {
   );
 }
 
+/** 在途的默认睡眠计时器：退出信号唤醒睡眠时统一取消（见 wake），进程不被滞留的计时器占住事件循环。 */
+const sleepTimers = new Set<ReturnType<typeof setTimeout>>();
+
+/** 默认睡眠：登记计时器，睡满时自摘；被退出信号取消时不再结算（race 已由唤醒方胜出）。 */
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      sleepTimers.delete(timer);
+      resolve();
+    }, ms);
+    sleepTimers.add(timer);
+  });
+
 export async function runDaemon(
   options: DaemonOptions,
   deps: DaemonDeps,
@@ -117,6 +131,9 @@ export async function runDaemon(
   let shutdown = false;
   const wakeFns = new Set<() => void>();
   const wake = (): void => {
+    // 先取消在途的睡眠计时器再唤醒等待者：优雅退出不等剩余的睡眠窗口（#39）。
+    for (const timer of [...sleepTimers]) clearTimeout(timer);
+    sleepTimers.clear();
     for (const fn of [...wakeFns]) fn();
   };
   const onSignal = (name: string): void => {
@@ -155,7 +172,7 @@ export async function runDaemon(
     },
     { dryRun: options.dryRun === true, shuttingDown: () => shutdown },
   );
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = deps.sleep ?? defaultSleep;
   const pollIntervalMs = config.pollIntervalSec * 1000;
   const graceMs = config.claude.timeoutSec * 1000;
 

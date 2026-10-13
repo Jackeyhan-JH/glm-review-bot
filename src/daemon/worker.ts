@@ -61,13 +61,19 @@ export interface DrainResult {
 /** 带时限地等一组 promise：全部完成 → 'done'；到时 → 'timeout'。 */
 export type GraceWaiter = (promises: Promise<void>[], graceMs: number) => Promise<'done' | 'timeout'>;
 
-export const defaultGraceWaiter: GraceWaiter = (promises, graceMs) =>
-  Promise.race([
-    Promise.all(promises).then(() => 'done' as const),
+export const defaultGraceWaiter: GraceWaiter = (promises, graceMs) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    Promise.all(promises).then(() => {
+      // 全部完成后清理限时计时器（#39）：滞留的 setTimeout 会把进程占住到 graceMs 走满。
+      if (timer !== undefined) clearTimeout(timer);
+      return 'done' as const;
+    }),
     new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), graceMs);
+      timer = setTimeout(() => resolve('timeout'), graceMs);
     }),
   ]);
+};
 
 /** awaitSettle 的结果。 */
 export interface SettleResult {

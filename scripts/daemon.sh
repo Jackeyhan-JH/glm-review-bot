@@ -70,8 +70,7 @@ cmd_stop() {
   fi
   echo "向守护进程 pid $pid 发送 SIGTERM，等待退出（最多 90 秒）…"
   kill -TERM "$pid"
-  local i
-  for i in $(seq 1 180); do
+  for _ in $(seq 1 180); do
     if ! kill -0 "$pid" 2>/dev/null; then
       echo "守护进程已退出。"
       rm -f "$PID_FILE"
