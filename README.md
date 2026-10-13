@@ -46,7 +46,7 @@ glm-review review <owner/repo> <PR号> --dry-run  # 手动预览一次审查（�
 scripts/daemon.sh start                        # 启动常驻守护进程，之后全自动
 ```
 
-日常启停 / 看日志 / 排障见 [docs/operations.md](docs/operations.md)。
+日常启停 / 看日志 / 排障见 [docs/operations.md](docs/operations.md)；真实仓库上的完整试跑记录（截图、命中率、用量与复跑指南）见 [docs/demo.md](docs/demo.md)。
 
 ## 配置
 
